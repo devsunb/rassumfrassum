@@ -475,6 +475,15 @@ class LspLogic:
                         expanded_patterns.extend(_process_watcher(watcher))
                     if expanded_patterns:
                         self.file_watchers[reg_id] = (source, expanded_patterns)
+
+        # Apply dynamic unregistrations to source.caps (the LSP spec
+        # really spells the field "unregisterations")
+        elif method == "client/unregisterCapability" and (
+            unregistrations := params.get("unregisterations")
+        ):
+            for unreg in unregistrations:
+                if cap_key := _CAP_KEY_BY_METHOD.get(unreg.get("method")):
+                    source.caps.pop(cap_key, None)
         return None
 
     async def on_server_notification(
