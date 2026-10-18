@@ -3,9 +3,9 @@
 Test mixed text sync kinds (#55): primary incremental, secondary full.
 
 rass must advertise Incremental to the client, translate to Full for
-the full-sync server, and turn range-less resync changes into ranged
-changes for incremental servers.  The servers assert their own
-expectations (shape of didChange changes, final text via didSave).
+the full-sync server, and turn range-less resync changes into a
+didClose/didOpen pair for a ruby-lsp lookalike, which rejects them.
+The servers report their mirrors and objections on didSave.
 """
 
 import asyncio
@@ -16,6 +16,23 @@ URI = 'file:///tmp/test.md'
 OPEN = 'line0\nline1\nline2\n'
 MID = 'line0\nline1X\nline2!\n'
 RESYNC = 'totally\ndifferent\n'
+SERVERS = ('s1', 's2', 'Ruby LSP')
+
+
+async def check_reports(client, text):
+    """Read each server's didSave report; check its mirror is TEXT."""
+    reports = {}
+    for _ in SERVERS:
+        r = await asyncio.wait_for(
+            client.read_notification('rass-test/docState'), timeout=5
+        )
+        log('client', f"report: {r}")
+        assert not r['errors'], r['errors']
+        assert r['doc'] == text, (
+            f"{r['server']} expected {text!r}, got {r['doc']!r}"
+        )
+        reports[r['server']] = r
+    return reports
 
 
 async def main():
@@ -72,9 +89,10 @@ async def main():
             'text': MID,
         },
     )
+    await check_reports(client, MID)
 
-    # Range-less "resync" change: rass must diff it into ranged
-    # changes for the incremental server
+    # Range-less "resync" change: forwarded verbatim to s1, but rass
+    # must reopen the document for 'Ruby LSP'
     await client.notify(
         'textDocument/didChange',
         {
@@ -89,8 +107,11 @@ async def main():
             'text': RESYNC,
         },
     )
+    reports = await check_reports(client, RESYNC)
+    assert reports['s1']['rangeless'] == 1, reports['s1']
+    assert reports['Ruby LSP']['opens'] == 2, reports['Ruby LSP']
 
-    log("client", "all didChange/didSave sequences sent")
+    log("client", "All assertions passed")
     await client.byebye()
 
 

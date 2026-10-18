@@ -4,16 +4,18 @@ Toy server with configurable textDocumentSync kind, tracking document
 state.
 
 Tracks the document it's told about, applying didChange content
-changes to a mirror.  Full-sync servers assert that every didChange
-carries a single range-less change; incremental servers assert that
-every change has a range.  On didSave, asserts that the mirror matches
-the expected text, so the client can check rass's translations.
+changes to a mirror, and notes any change whose shape it doesn't
+accept: full-sync servers take a single range-less change, and a
+server named 'Ruby LSP' takes only ranged ones, like the real
+ruby-lsp.  On didSave, sends the mirror, those notes and some counters
+upstream in a 'rass-test/docState' notification so the client can
+check them.  (A server that exits on a failed check doesn't reliably
+make run.sh fail.)
 """
 
 import argparse
-import os
-import sys
 
+from rassumfrassum.json import write_message_sync
 from rassumfrassum.test2 import run_toy_server
 
 parser = argparse.ArgumentParser()
@@ -27,12 +29,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 sync_kind = args.text_document_sync
-state = {'doc': ''}
-
-
-def fail(msg):
-    print(f"FAIL: {msg}", file=sys.stderr, flush=True)
-    os._exit(1)
+state = {'doc': '', 'errors': [], 'opens': 0, 'rangeless': 0}
 
 
 def offset(text, pos):
@@ -58,25 +55,33 @@ def apply_changes(text, changes):
 
 def did_open(params):
     state['doc'] = params['textDocument']['text']
+    state['opens'] += 1
+
+
+def did_close(params):
+    state['doc'] = ''
 
 
 def did_change(params):
     changes = params['contentChanges']
     if sync_kind == 1:
         if not (len(changes) == 1 and 'range' not in changes[0]):
-            fail(f"full-sync server got ranged changes: {changes}")
-    else:
+            state['errors'].append(f"full-sync server got {changes}")
+    elif args.name == 'Ruby LSP':
         if not all('range' in c for c in changes):
-            fail(f"incremental server got range-less change: {changes}")
+            state['errors'].append(f"ranged-only server got {changes}")
+    state['rangeless'] += any('range' not in c for c in changes)
     state['doc'] = apply_changes(state['doc'], changes)
 
 
 def did_save(params):
-    if state['doc'] != params.get('text'):
-        fail(
-            f"server {args.name} doc mismatch: {state['doc']!r} "
-            f"vs expected {params.get('text')!r}"
-        )
+    write_message_sync(
+        {
+            'jsonrpc': '2.0',
+            'method': 'rass-test/docState',
+            'params': {'server': args.name, **state},
+        }
+    )
 
 
 run_toy_server(
@@ -91,6 +96,7 @@ run_toy_server(
     },
     notification_handlers={
         'textDocument/didOpen': did_open,
+        'textDocument/didClose': did_close,
         'textDocument/didChange': did_change,
         'textDocument/didSave': did_save,
     },

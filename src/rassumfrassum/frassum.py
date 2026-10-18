@@ -3,7 +3,6 @@ LSP-specific message routing and merging logic.
 """
 
 import asyncio
-import difflib
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -41,6 +40,7 @@ class LspDocument:
     uri: str
     docver: int
     text: str = ""
+    language_id: str = ""
     stashed_items: set[int] = field(
         default_factory=set
     )  # lean_ids of stashed completion/codeAction items
@@ -69,6 +69,11 @@ class DirectResponse:
 
     payload: JSON
     is_error: bool = False
+
+
+# Incremental servers that reject range-less didChange contentChanges
+# (matched by serverInfo.name).  Resync them by reopening (#55).
+_RANGED_ONLY_SERVERS = frozenset({'Ruby LSP'})
 
 
 class LspLogic:
@@ -266,7 +271,9 @@ class LspLogic:
                         else {}
                     )
                     # Replace with fresh state, keeping the text mirror
-                    state = LspDocument(uri, version, state.text)
+                    state = LspDocument(
+                        uri, version, state.text, state.language_id
+                    )
                     state.inflight_pulls.update(old_pulls)
                     self.documents[uri] = state
                 return state
@@ -282,6 +289,7 @@ class LspLogic:
             uri = params["textDocument"]["uri"]
             state = reset_state(uri, params["textDocument"].get("version"))
             state.text = params["textDocument"].get("text", "")
+            state.language_id = params["textDocument"].get("languageId", "")
             await forward_all()
             # In streaming mode, pull diagnostics from pull-capable servers
             if self.opts.stream_diagnostics:
@@ -324,9 +332,9 @@ class LspLogic:
         """Forward client didChange, translating sync kind per server.
 
         Full-sync servers get the whole text computed from our mirror;
-        incremental servers get ranged changes (the client's verbatim,
-        or a diff if the client sent a range-less full change, which
-        some incremental servers can't take).
+        incremental servers get the client's changes verbatim, except
+        that _RANGED_ONLY_SERVERS get a range-less change as a didClose
+        followed by a didOpen of the new text.
         """
         old_text = state.text
         try:
@@ -348,26 +356,30 @@ class LspLogic:
             'textDocument': text_doc,
             'contentChanges': content_changes,
         }
-        diff_changes = None
+        rangeless = any('range' not in c for c in content_changes)
 
         for server in self.servers.values():
-            kind = server.sync_kind
-            if kind == 1:
+            if server.sync_kind == 1:
                 params = full_params
-            elif kind == 2:
-                if any('range' not in c for c in content_changes):
-                    if diff_changes is None:
-                        diff_changes = _diff_changes(old_text, new_text)
-                    if not diff_changes:
-                        continue
-                    params = {
-                        'textDocument': text_doc,
-                        'contentChanges': diff_changes,
-                    }
-                else:
-                    params = verbatim_params
+            elif rangeless and server.name in _RANGED_ONLY_SERVERS:
+                await self.notify_server(
+                    server,
+                    'textDocument/didClose',
+                    {'textDocument': {'uri': state.uri}},
+                )
+                await self.notify_server(
+                    server,
+                    'textDocument/didOpen',
+                    {
+                        'textDocument': {
+                            **text_doc,
+                            'languageId': state.language_id,
+                            'text': new_text,
+                        }
+                    },
+                )
+                continue
             else:
-                # Unknown sync kind: forward verbatim (historical behavior)
                 params = verbatim_params
             await self.notify_server(server, 'textDocument/didChange', params)
 
@@ -985,34 +997,6 @@ def _apply_content_changes(text: str, changes: JSON) -> str:
         end = _lsp_position(text, r['end'])
         text = text[:start] + new + text[end:]
     return text
-
-
-def _diff_changes(old: str, new: str) -> list[JSON]:
-    """Compute line-based ranged contentChanges transforming old into new.
-
-    Ranges are rebased so that applying the changes in order (see
-    _apply_content_changes) yields new."""
-    old_lines = old.splitlines(keepends=True)
-    new_lines = new.splitlines(keepends=True)
-    matcher = difflib.SequenceMatcher(
-        None, old_lines, new_lines, autojunk=False
-    )
-    changes = []
-    line_delta = 0
-    for op, i1, i2, j1, j2 in matcher.get_opcodes():
-        if op == 'equal':
-            continue
-        changes.append(
-            {
-                'range': {
-                    'start': {'line': i1 + line_delta, 'character': 0},
-                    'end': {'line': i2 + line_delta, 'character': 0},
-                },
-                'text': ''.join(new_lines[j1:j2]),
-            }
-        )
-        line_delta += (j2 - j1) - (i2 - i1)
-    return changes
 
 
 def _add_source_attribution(diags, server):
