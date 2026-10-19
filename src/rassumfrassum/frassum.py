@@ -494,6 +494,9 @@ class LspLogic:
                     await asyncio.sleep(
                         self.get_aggregation_timeout_ms(method) / 1000.0
                     )
+                    # Else _publish_pushdiags cancels this very task,
+                    # interrupting the write to the client
+                    state.push_diags_timer = None
                     await self._publish_pushdiags(uri, state)
 
                 state.push_diags_timer = asyncio.create_task(send_on_timeout())
