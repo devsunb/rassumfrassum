@@ -600,6 +600,10 @@ class LspLogic:
         """
         if method == 'textDocument/publishDiagnostics':
             return 1000
+        # Servers can take long to start, and one that misses initialize
+        # is ignored for the whole session
+        if method == 'initialize':
+            return self.opts.initialize_timeout_ms
         return 3000
 
     def process_responses(

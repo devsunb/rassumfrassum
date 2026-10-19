@@ -303,6 +303,12 @@ simply dropped and the client sees whatever it got when the timeout
 expired.  If it's false, the most up-to-date state of the aggregation
 is simply retransmitted to the client.  The default is false.
 
+The `--initialize-timeout-ms N` option sets how long rass waits for all
+servers to answer `initialize` before replying to the client with what
+it has.  A server that misses it is ignored for the whole session, so
+the default, 20000, is generous, but below Eglot's 30 seconds
+`eglot-connect-timeout`.  Other requests wait 3000ms.
+
 The `--logic-class CLASS` option specifies which routing logic class
 to use.  The default is `LspLogic`.  You can specify a simple class
 name (which will be looked up in the `rassumfrassum.frassum` module)

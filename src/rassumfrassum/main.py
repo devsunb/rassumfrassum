@@ -90,6 +90,13 @@ def main(argv=None) -> None:
         help='Delay all messages from rass by N ms.',
     )
     parser.add_argument(
+        '--initialize-timeout-ms',
+        type=int,
+        default=20000,
+        metavar='N',
+        help='Wait N ms for all servers to answer initialize (default: 20000).',
+    )
+    parser.add_argument(
         '--drop-tardy',
         action='store_true',
         help='Drop tardy messages instead of re-sending aggregations.',
