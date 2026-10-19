@@ -263,6 +263,23 @@ wire up the stdio connections and launches `client.py` connected to
 
 To run all tests, use `test/run-all.sh`.
 
+Some tests run real servers, and are skipped if those aren't in
+`PATH`.  To run all of them, install the servers in a project-local
+`.venv`:
+
+```bash
+uv sync   # or: python -m venv .venv && .venv/bin/pip install -e . --group dev
+npm install -g --prefix .venv/node typescript-language-server \
+    typescript@6 @biomejs/biome vscode-langservers-extracted
+ln -s "$PWD"/.venv/node/bin/* .venv/bin/
+cargo install --root .venv codebook-lsp
+source .venv/bin/activate
+test/run-all.sh
+```
+
+`typescript@6` because TypeScript 7 no longer ships the `tsserver`
+that `typescript-language-server` needs.
+
 ### Logging
 
 The `stderr` output of rass is useful for peeking into the

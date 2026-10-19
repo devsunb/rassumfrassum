@@ -32,6 +32,13 @@ Issues = "https://github.com/joaotavora/rassumfrassum/issues"
 [project.scripts]
 rass = "rassumfrassum.main:main"
 
+# Language servers some tests run for real (see test/*/run.sh).
+# `uv sync` installs these by default; with pip, use
+# `pip install -e . --group dev`.  Node servers and codebook-lsp
+# must be installed separately.
+[dependency-groups]
+dev = ["basedpyright", "ruff", "ty"]
+
 [tool.basedpyright]
 typeCheckingMode = "standard"
 pythonVersion = "3.13"
