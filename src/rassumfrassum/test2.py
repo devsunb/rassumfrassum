@@ -149,7 +149,10 @@ class LspTestEndpoint:
             log(self.name, f"Skipping response: id={msg['id']}")
 
     async def initialize(
-        self, capabilities: JSON | None = None, rootUri: str | None = None
+        self,
+        capabilities: JSON | None = None,
+        rootUri: str | None = None,
+        initializationOptions: JSON | None = None,
     ) -> JSON:
         """
         Send initialize request and initialized notification.
@@ -184,9 +187,10 @@ class LspTestEndpoint:
 
         # Send initialize request
         log(self.name, "Sending initialize")
-        req_id = await self.request(
-            'initialize', {'rootUri': rootUri, 'capabilities': merged_caps}
-        )
+        params: JSON = {'rootUri': rootUri, 'capabilities': merged_caps}
+        if initializationOptions is not None:
+            params['initializationOptions'] = initializationOptions
+        req_id = await self.request('initialize', params)
 
         # Read initialize response
         msg = await self.read_response(req_id)

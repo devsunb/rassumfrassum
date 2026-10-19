@@ -6,7 +6,7 @@ Tests multi-server completion support.
 
 import asyncio
 
-from rassumfrassum.test2 import LspTestEndpoint, log
+from rassumfrassum.test2 import LspTestEndpoint, log, scaled_timeout
 
 async def main():
     """Test multi-server completions with real servers."""
@@ -49,28 +49,38 @@ async def main():
         }
     })
 
-    # Request completions at position after "sys."
-    req_id = await client.request('textDocument/completion', {
-        'textDocument': {'uri': 'file:///tmp/test.py'},
-        'position': {'line': 2, 'character': 4},
-        'context': {'triggerKind': 2, 'triggerCharacter': '.'}
-    })
+    # Request completions at position after "sys.".  A cold
+    # basedpyright can miss rass's aggregation timeout, leaving only
+    # ty's items, so retry until basedpyright's show up.
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + scaled_timeout(20)
+    probe = None
+    while probe is None:
+        req_id = await client.request('textDocument/completion', {
+            'textDocument': {'uri': 'file:///tmp/test.py'},
+            'position': {'line': 2, 'character': 4},
+            'context': {'triggerKind': 2, 'triggerCharacter': '.'}
+        })
 
-    # Read completion response
-    comp_response = await client.read_response(req_id)
-    result = comp_response['result']
-    items = result.get('items', [])
+        # Read completion response
+        comp_response = await client.read_response(req_id)
+        result = comp_response['result']
+        items = result.get('items', [])
 
-    log("client", f"Got {len(items)} completion items")
-    assert len(items) > 0, "Expected at least one completion item"
+        log("client", f"Got {len(items)} completion items")
+        assert len(items) > 0, "Expected at least one completion item"
 
-    # Check if items have data fields (should be stashed)
-    items_with_data = [item for item in items if 'data' in item]
-    log("client", f"Found {len(items_with_data)} items with data fields")
+        # Check if items have data fields (should be stashed)
+        items_with_data = [item for item in items if 'data' in item]
+        log("client", f"Found {len(items_with_data)} items with data fields")
 
-    # Find an item without detail to resolve (basedpyright items lack detail)
-    probe = next((item for item in items if 'data' in item and 'detail' not in item), None)
-    assert probe is not None, "Expected to find at least one item with data but no detail"
+        # Find an item without detail to resolve (basedpyright items lack detail)
+        probe = next((item for item in items if 'data' in item and 'detail' not in item), None)
+        if probe is None:
+            assert loop.time() < deadline, (
+                "Expected to find at least one item with data but no detail"
+            )
+            log("client", "No basedpyright items yet, retrying")
     log("client", f"Found item to resolve: {probe['label']}")
 
     # Send completionItem/resolve request

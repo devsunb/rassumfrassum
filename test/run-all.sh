@@ -2,7 +2,7 @@
 # Run all tests in parallel and report results
 
 TIMEOUT_SCALE=${TIMEOUT_SCALE:-1.0}
-TIMEOUT=$(awk "BEGIN {printf \"%.1f\", ${TIMEOUT:-10} * $TIMEOUT_SCALE}")
+TIMEOUT=$(awk "BEGIN {printf \"%.1f\", ${TIMEOUT:-30} * $TIMEOUT_SCALE}")
 BATCH_SIZE=${BATCH_SIZE:-8}
 
 # Colorize helper (set to false to disable colors)

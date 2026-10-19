@@ -22,7 +22,13 @@ async def main():
             'workspaceFolders': True,
         }
     }
-    _ = await client.initialize(capabilities=init_caps, rootUri='file:///tmp')
+    # Pin Ruff's rules: its defaults change between releases (0.17
+    # dropped E703, the unnecessary semicolon in fileA)
+    _ = await client.initialize(
+        capabilities=init_caps,
+        rootUri='file:///tmp',
+        initializationOptions={'settings': {'lint': {'select': ['E703']}}},
+    )
 
     # Open file A with a typo
     await client.notify('textDocument/didOpen', {
@@ -44,26 +50,37 @@ async def main():
         }
     })
 
-    # Collect initial diagnostics
+    A = 'file:///tmp/fileA.py'
+    B = 'file:///tmp/fileB.py'
+    # Diagnostics sources each file settles on
+    EXPECTED = {
+        A: ['Codebook', 'Codebook', 'Ruff'],
+        B: ['Codebook'],
+    }
     diagnostics_by_uri = {}
-    async def collect_diags():
-        """Collect diagnostic notifications."""
-        while payload := await client.read_notification('textDocument/publishDiagnostics'):
+
+    def sources(uri):
+        return sorted(d['source'] for d in diagnostics_by_uri.get(uri, []))
+
+    async def collect_diags(until=None):
+        """Collect diagnostic notifications, stopping once UNTIL() holds."""
+        while not (until and until()):
+            payload = await client.read_notification(
+                'textDocument/publishDiagnostics'
+            )
             uri = payload['uri']
             diags = payload.get('diagnostics', [])
             diagnostics_by_uri[uri] = diags
             log("client", f"Got {len(diags)} diagnostic(s) for {uri}")
 
-    try:
-        await asyncio.wait_for(collect_diags(), timeout=scaled_timeout(1.5))
-    except asyncio.TimeoutError:
-        pass
-
-    # Check we got initial diagnostics for fileB
-    a_before = diagnostics_by_uri.get('file:///tmp/fileA.py', [])
-    b_before = diagnostics_by_uri.get('file:///tmp/fileB.py', [])
-    assert len(a_before) > 0, "fileA should have initial diagnostics!"
-    assert len(b_before) > 0, "fileB should have initial diagnostics!"
+    # Servers can be slow to report under load, so wait for the
+    # expected diagnostics instead of for a fixed time
+    await asyncio.wait_for(
+        collect_diags(lambda: all(sources(u) == e for u, e in EXPECTED.items())),
+        timeout=scaled_timeout(10),
+    )
+    a_before = diagnostics_by_uri[A]
+    b_before = diagnostics_by_uri[B]
 
     # Now change fileA
     await client.notify('textDocument/didChange', {
@@ -88,20 +105,22 @@ async def main():
         }
     })
 
-    # Collect diagnostics after the change
+    # Wait for fileA's complete re-report, then keep listening a bit,
+    # since a wrongly cleared fileB could be published after it
+    del diagnostics_by_uri[A]
+    await asyncio.wait_for(
+        collect_diags(lambda: sources(A) == EXPECTED[A]),
+        timeout=scaled_timeout(10),
+    )
     try:
         await asyncio.wait_for(collect_diags(), timeout=scaled_timeout(1.5))
     except asyncio.TimeoutError:
         pass
 
-    a_after = diagnostics_by_uri.get('file:///tmp/fileA.py', [])
-    b_after = diagnostics_by_uri.get('file:///tmp/fileB.py', [])
-
-    assert b_after == b_before, "fileB should have kept diagnostics!"
-
-    assert len(a_after) == len(a_before), "fileA should have kept diagnostics!"
-    # brittle, since order could be changed...
-    assert [s['source'] for s in a_after] == [s['source'] for s in a_before]
+    assert diagnostics_by_uri[B] == b_before, "fileB should have kept diagnostics!"
+    assert sources(A) == sorted(d['source'] for d in a_before), (
+        "fileA should have kept diagnostics!"
+    )
 
     await client.byebye()
 
