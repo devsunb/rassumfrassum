@@ -7,7 +7,7 @@ cd $(dirname "$0")
 # s3 (tertiary) has renameProvider
 # Expected: rename request goes ONLY to s2 (first with capability), NOT to s3
 
-../yoyo.sh ./client.py --rass-- \
+python ../yoyo.py ./client.py --rass-- \
     -- python ./server.py --name s1 \
     -- python ./server.py --name s2 --has-rename \
     -- python ./server.py --name s3 --has-rename

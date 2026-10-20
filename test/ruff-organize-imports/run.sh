@@ -7,4 +7,4 @@ if ! command -v ruff >/dev/null 2>&1; then
     exit 77
 fi
 
-../yoyo.sh ./client.py --rass-- -- ruff server
+python ../yoyo.py ./client.py --rass-- -- ruff server

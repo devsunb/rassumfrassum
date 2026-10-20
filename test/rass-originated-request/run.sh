@@ -6,5 +6,5 @@ cd $(dirname "$0")
 # so rass can import the custom_logic module
 export PYTHONPATH="$(pwd):${PYTHONPATH}"
 
-../yoyo.sh ./client.py --rass-- --logic-class custom_logic.CustomLogic \
+python ../yoyo.py ./client.py --rass-- --logic-class custom_logic.CustomLogic \
     -- python ./server.py

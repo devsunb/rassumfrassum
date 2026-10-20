@@ -9,4 +9,4 @@ if ! command -v ty >/dev/null 2>&1 || \
     exit 77
 fi
 
-../yoyo.sh ./client.py --rass-- -- ty server -- ruff server
+python ../yoyo.py ./client.py --rass-- -- ty server -- ruff server

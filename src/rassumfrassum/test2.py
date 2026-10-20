@@ -222,7 +222,7 @@ class LspTestEndpoint:
         # fragile and deadlocks during normal asyncio cleanup. Don't
         # have time to debug it.  Force exit on Windows, clean exit
         # elsewhere.
-        if os.getenv('WINDOWS_KLUDGE'):
+        if sys.platform == 'win32':
             os._exit(0)
         else:
             sys.exit(0)

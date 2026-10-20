@@ -7,6 +7,6 @@ cd $(dirname "$0")
 # 3000ms aggregation timeout but within the initialize timeout, and is
 # the only definition provider
 
-../yoyo.sh ./client.py --rass-- \
+python ../yoyo.py ./client.py --rass-- \
     -- python ./server.py --name s1 \
     -- python ./server.py --name s2 --initialize-delay 4000 --definition

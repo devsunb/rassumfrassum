@@ -5,7 +5,7 @@ cd $(dirname "$0")
 # We expect rass to exit with error code 1
 
 set +e
-../yoyo.sh ./client.py --rass-- \
+python ../yoyo.py ./client.py --rass-- \
     -- python ./server.py --name s1 \
     -- python ./server.py --name s2 --crash-after-init
 EXIT_CODE=$?

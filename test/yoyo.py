@@ -2,6 +2,8 @@
 """
 Cross-platform relay for rassumfrassum tests.
 Connects a client script to rassumfrassum, relaying stdio between them.
+(A mkfifo shell pipeline is simpler, but macOS's kqueue mishandles
+FIFOs, breaking asyncio's pipe transports.)
 
 Usage: yoyo.py <client_script> [client_args...] --rass-- [rass_args...]
 
@@ -73,8 +75,9 @@ async def run_relay(client_args, rass_args, env):
     crc = client.returncode
     rrc = rass.returncode
 
-    print(f"[yoyo.py] client rc=${crc} rass rc={rrc}", file=sys.stderr)
-    return 0 if (crc == 0 and rrc == 0) else 1
+    print(f"[yoyo.py] client rc={crc} rass rc={rrc}", file=sys.stderr)
+    # Like a shell pipeline with pipefail: rass's status, else client's
+    return rrc or crc
 
 
 if __name__ == "__main__":
@@ -100,7 +103,7 @@ if __name__ == "__main__":
     rass_args = sys.argv[rass_idx + 1 :]  # Args after --rass--
 
     # Set up PYTHONPATH to include src directory
-    repo_root = Path(__file__).parent.parent
+    repo_root = Path(__file__).resolve().parent.parent
     src_dir = repo_root / "src"
 
     env = os.environ.copy()

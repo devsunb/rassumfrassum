@@ -10,7 +10,7 @@ if ! command -v basedpyright-langserver >/dev/null 2>&1 || \
     exit 77
 fi
 
-../yoyo.sh ./client.py --rass-- --stream-diagnostics \
+python ../yoyo.py ./client.py --rass-- --stream-diagnostics \
     -- basedpyright-langserver --stdio \
     -- ruff server \
     -- codebook-lsp serve

@@ -19,4 +19,4 @@ fi
     exit 77
 }
 
-../yoyo.sh ./client.py --rass-- tslint --stream-diagnostics
+python ../yoyo.py ./client.py --rass-- tslint --stream-diagnostics

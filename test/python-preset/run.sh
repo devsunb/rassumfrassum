@@ -10,4 +10,4 @@ if ! command -v ty >/dev/null 2>&1 || \
     exit 77
 fi
 
-../yoyo.sh ./client.py --rass-- python
+python ../yoyo.py ./client.py --rass-- python

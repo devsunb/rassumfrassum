@@ -9,6 +9,6 @@ if ! command -v basedpyright-langserver >/dev/null 2>&1 || \
     exit 77
 fi
 
-../yoyo.sh ./client.py --rass-- \
+python ../yoyo.py ./client.py --rass-- \
     -- basedpyright-langserver --stdio \
     -- ty server

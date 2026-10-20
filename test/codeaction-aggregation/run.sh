@@ -7,7 +7,7 @@ cd $(dirname "$0")
 # s3 (tertiary) has codeActionProvider
 # Expected: codeAction request goes to s2 and s3, responses aggregated
 
-../yoyo.sh ./client.py --rass-- \
+python ../yoyo.py ./client.py --rass-- \
     -- python ./server.py --name s1 \
     -- python ./server.py --name s2 --has-code-actions \
     -- python ./server.py --name s3 --has-code-actions

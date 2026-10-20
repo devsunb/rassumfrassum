@@ -13,4 +13,4 @@ if ! command -v typescript-language-server >/dev/null 2>&1; then
     exit 77
 fi
 
-../yoyo.sh ./client.py --rass-- tsbiome
+python ../yoyo.py ./client.py --rass-- tsbiome
