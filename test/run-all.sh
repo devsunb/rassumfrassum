@@ -5,6 +5,16 @@ TIMEOUT_SCALE=${TIMEOUT_SCALE:-1.0}
 TIMEOUT=$(awk "BEGIN {printf \"%.1f\", ${TIMEOUT:-30} * $TIMEOUT_SCALE}")
 BATCH_SIZE=${BATCH_SIZE:-8}
 
+# macOS has no 'timeout', but Homebrew's coreutils has 'gtimeout'
+if ! command -v timeout >/dev/null; then
+    command -v gtimeout >/dev/null ||
+        { echo "No 'timeout' (on macOS: brew install coreutils)" >&2; exit 1; }
+    timeout() { gtimeout "$@"; }
+fi
+
+# BSD/macOS 'date' has no %N
+now() { python -c 'import time; print(time.time())'; }
+
 # Colorize helper (set to false to disable colors)
 USE_COLOR=true
 colorize() {
@@ -22,8 +32,9 @@ colorize() {
 export -f colorize
 export USE_COLOR
 
-# Find all test directories (those containing run.sh)
-TEST_DIRS=$(find test -mindepth 2 -maxdepth 2 -name "run.sh" -type f -executable | sed 's|/run.sh$||' | sort)
+# Find all test directories (those containing run.sh).
+# (-perm -u+x instead of -executable: works in BSD/macOS find too)
+TEST_DIRS=$(find test -mindepth 2 -maxdepth 2 -name "run.sh" -type f -perm -u+x | sed 's|/run.sh$||' | sort)
 
 if [ -z "$TEST_DIRS" ]; then
     echo "No tests found"
@@ -54,12 +65,11 @@ for ((i=0; i<TOTAL_TESTS; i+=BATCH_SIZE)); do
 
         # Run in background, capturing output and timing
         (
-            start=$(date +%s%N)
+            start=$(now)
             output=$(timeout "$TIMEOUT" "$d/run.sh" 2>&1)
             rc=$?
-            end=$(date +%s%N)
-            elapsed_ns=$((end - start))
-            elapsed=$(awk "BEGIN {printf \"%.3f\", $elapsed_ns / 1000000000}")
+            end=$(now)
+            elapsed=$(awk "BEGIN {printf \"%.3f\", $end - $start}")
 
             # Determine status with colors
             case $rc in
