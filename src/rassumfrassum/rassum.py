@@ -309,7 +309,8 @@ async def run_multiplexer(
         """
         Send a notification to a server (for use by logic layer).
         """
-        if shutting_down:
+        # Servers still need 'exit' after 'shutdown'
+        if shutting_down and method != "exit":
             debug(f"Skipping notification to server (shutting down): {method}")
             return
 
@@ -502,6 +503,12 @@ async def run_multiplexer(
                         await logic.on_client_notification(
                             method, msg.get("params", {})
                         )
+                    # 'exit' has been forwarded to the servers.  Stop
+                    # reading: the client may keep its end open and
+                    # wait for us to exit (Eglot does).
+                    if method == "exit":
+                        shutting_down = True
+                        break
                 elif method is not None:
                     # Client request
                     id = cast(ReqId, id)
