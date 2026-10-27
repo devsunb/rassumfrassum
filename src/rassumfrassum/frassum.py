@@ -21,6 +21,44 @@ from .util import (
     warn,
 )
 
+# LSP method name -> ServerCapabilities key.
+_CAP_KEY_BY_METHOD: dict[str, str] = {
+    'textDocument/codeAction': 'codeActionProvider',
+    'textDocument/completion': 'completionProvider',
+    'textDocument/declaration': 'declarationProvider',
+    'textDocument/definition': 'definitionProvider',
+    'textDocument/diagnostic': 'diagnosticProvider',
+    'textDocument/documentSymbol': 'documentSymbolProvider',
+    'textDocument/formatting': 'documentFormattingProvider',
+    'textDocument/implementation': 'implementationProvider',
+    'textDocument/rangeFormatting': 'documentRangeFormattingProvider',
+    'textDocument/references': 'referencesProvider',
+    'textDocument/rename': 'renameProvider',
+    'textDocument/typeDefinition': 'typeDefinitionProvider',
+}
+
+# Routed to all servers with the capability.
+_MULTI_FANOUT_METHODS = frozenset(
+    {
+        'textDocument/codeAction',
+        'textDocument/declaration',
+        'textDocument/definition',
+        'textDocument/implementation',
+        'textDocument/references',
+        'textDocument/typeDefinition',
+    }
+)
+
+# Routed to the first server with the capability.
+_FIRST_MATCH_METHODS = frozenset(
+    {
+        'textDocument/documentSymbol',
+        'textDocument/formatting',
+        'textDocument/rangeFormatting',
+        'textDocument/rename',
+    }
+)
+
 
 def _advertises(caps: JSON, cap: str) -> bool:
     """Return True if CAPS advertises CAP.
@@ -173,20 +211,9 @@ class LspLogic:
         elif method == 'shutdown':
             return servers
 
-        # Route codeAction to all supporting servers
-        elif method == 'textDocument/codeAction':
-            return [
-                s for s in servers if _advertises(s.caps, 'codeActionProvider')
-            ]
-
-        # Route location-based requests to all supporting servers
-        elif cap := {
-            'textDocument/definition': 'definitionProvider',
-            'textDocument/typeDefinition': 'typeDefinitionProvider',
-            'textDocument/implementation': 'implementationProvider',
-            'textDocument/declaration': 'declarationProvider',
-            'textDocument/references': 'referencesProvider',
-        }.get(method):
+        # Route to all servers advertising the corresponding capability
+        elif method in _MULTI_FANOUT_METHODS:
+            cap = _CAP_KEY_BY_METHOD[method]
             return [s for s in servers if _advertises(s.caps, cap)]
 
         elif method == 'workspace/executeCommand':
@@ -195,28 +222,23 @@ class LspLogic:
 
         # Completions is special
         elif method == 'textDocument/completion':
-            cands = [
-                s for s in servers if _advertises(s.caps, 'completionProvider')
-            ]
+            cap = _CAP_KEY_BY_METHOD[method]
+            cands = [s for s in servers if _advertises(s.caps, cap)]
             if len(cands) <= 1:
                 return cands
             if k := params.get("context", {}).get("triggerCharacter"):
                 return [
                     s
                     for s in cands
-                    if (cp := s.caps.get("completionProvider"))
+                    if (cp := s.caps.get(cap))
                     and k in cp.get("triggerCharacters", [])
                 ]
             else:
                 return cands
 
-        # Route these to at most one server supporting this capability
-        elif cap := {
-            'textDocument/rename': 'renameProvider',
-            'textDocument/formatting': 'documentFormattingProvider',
-            'textDocument/rangeFormatting': 'documentRangeFormattingProvider',
-            'textDocument/documentSymbol': 'documentSymbolProvider',
-        }.get(method):
+        # Route to the first server advertising the corresponding capability
+        elif method in _FIRST_MATCH_METHODS:
+            cap = _CAP_KEY_BY_METHOD[method]
             for s in servers:
                 if _advertises(s.caps, cap):
                     return [s]
@@ -229,7 +251,7 @@ class LspLogic:
                 (text_doc := params.get('textDocument'))
                 and (uri := text_doc.get('uri'))
                 and (state := self.documents.get(uri))
-                and (targets := [s for s in servers if s.caps.get('diagnosticProvider')])
+                and (targets := [s for s in servers if s.caps.get(_CAP_KEY_BY_METHOD[method])])
             ):
                 # Register inflight pulls for all target servers
                 for target in targets:
