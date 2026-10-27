@@ -22,6 +22,16 @@ from .util import (
 )
 
 
+def _advertises(caps: JSON, cap: str) -> bool:
+    """Return True if CAPS advertises CAP.
+
+    A capability is either a boolean or an options object, and an empty
+    options object `{}` still means the capability is supported.
+    """
+    value = caps.get(cap)
+    return value is not None and value is not False
+
+
 @dataclass
 class Server:
     """Information about a logical LSP server."""
@@ -165,7 +175,9 @@ class LspLogic:
 
         # Route codeAction to all supporting servers
         elif method == 'textDocument/codeAction':
-            return [s for s in servers if s.caps.get('codeActionProvider')]
+            return [
+                s for s in servers if _advertises(s.caps, 'codeActionProvider')
+            ]
 
         # Route location-based requests to all supporting servers
         elif cap := {
@@ -175,7 +187,7 @@ class LspLogic:
             'textDocument/declaration': 'declarationProvider',
             'textDocument/references': 'referencesProvider',
         }.get(method):
-            return [s for s in servers if s.caps.get(cap) is not None]
+            return [s for s in servers if _advertises(s.caps, cap)]
 
         elif method == 'workspace/executeCommand':
             probe = self.commands_map.get(cast(str, params.get('command')))
@@ -183,7 +195,9 @@ class LspLogic:
 
         # Completions is special
         elif method == 'textDocument/completion':
-            cands = [s for s in servers if s.caps.get('completionProvider')]
+            cands = [
+                s for s in servers if _advertises(s.caps, 'completionProvider')
+            ]
             if len(cands) <= 1:
                 return cands
             if k := params.get("context", {}).get("triggerCharacter"):
@@ -204,7 +218,7 @@ class LspLogic:
             'textDocument/documentSymbol': 'documentSymbolProvider',
         }.get(method):
             for s in servers:
-                if s.caps.get(cap) is not None:
+                if _advertises(s.caps, cap):
                     return [s]
             return []
 
