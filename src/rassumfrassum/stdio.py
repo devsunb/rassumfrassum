@@ -4,6 +4,7 @@ On Windows, this is unfortunately more complicated
 """
 
 import asyncio
+import os
 import platform
 import socket
 import sys
@@ -13,35 +14,39 @@ import threading
 async def create_stdin_reader() -> asyncio.StreamReader:
     """Create an asyncio StreamReader for stdin.
 
-    On Windows: Uses run_in_executor with blocking reads.
+    On Windows: Uses blocking reads in a daemon thread.
     On Unix: Direct connection to sys.stdin.
     """
     loop = asyncio.get_event_loop()
     reader = asyncio.StreamReader()
 
     if platform.system() == 'Windows':
-        # Windows: Use run_in_executor to avoid pipe issues
-        async def read_stdin_loop():
-            def blocking_read1():
-                """Blocking read1 from stdin buffer - reads available data."""
+        # Windows: Use blocking reads to avoid pipe issues.  Read in a
+        # daemon thread, not in the default executor: asyncio.run()
+        # joins executor threads on the way out, so a read blocked on
+        # a client that keeps stdin open would keep us from exiting.
+        # Read the file descriptor, not sys.stdin.buffer, whose lock
+        # the blocked read would hold during interpreter shutdown.
+        fd = sys.stdin.fileno()
+
+        def read_stdin_loop():
+            while True:
                 try:
-                    # read1() reads whatever is available, doesn't block for full buffer
-                    return sys.stdin.buffer.read1(4096)
+                    # Returns whatever is available, without waiting
+                    # for a full buffer.
+                    chunk = os.read(fd, 4096)
                 except Exception:
-                    return b''
-
-            try:
-                while True:
-                    chunk = await loop.run_in_executor(None, blocking_read1)
+                    chunk = b''
+                try:
                     if not chunk:
-                        break
-                    reader.feed_data(chunk)
-                reader.feed_eof()
-            except Exception:
-                reader.feed_eof()
+                        loop.call_soon_threadsafe(reader.feed_eof)
+                        return
+                    loop.call_soon_threadsafe(reader.feed_data, chunk)
+                except RuntimeError:
+                    # The loop is closed: we're exiting.
+                    return
 
-        # Start the reading task in the background
-        asyncio.create_task(read_stdin_loop())
+        threading.Thread(target=read_stdin_loop, daemon=True).start()
         return reader
     else:
         # Unix: Direct connection works fine
