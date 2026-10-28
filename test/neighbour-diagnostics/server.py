@@ -15,6 +15,9 @@ def did_change(params):
     docs[params['textDocument']['uri']] = params['contentChanges'][-1]['text']
 
 def diagnostic(msg_id, params):
+    # previousResultId is an optional string: strict servers, like
+    # TypeScript 7's, reject a null one.
+    assert isinstance(params.get('previousResultId', ''), str), params
     uri = params['textDocument']['uri']
     texts = docs.values() if args.inter_file else [docs.get(uri, '')]
     boom = any('boom' in t for t in texts)
