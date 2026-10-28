@@ -903,13 +903,13 @@ class LspLogic:
         """
 
         async def doit(server: Server, uri: str, state: LspDocument):
+            params: JSON = {'textDocument': {'uri': uri}}
+            # previousResultId is an optional string: omit it rather
+            # than send null before the first report.
+            if isinstance(prev := state.inflight_pulls.get(id(server)), str):
+                params['previousResultId'] = prev
             is_error, pull_response = await self.request_server(
-                server,
-                'textDocument/diagnostic',
-                {
-                    'textDocument': {'uri': uri},
-                    'previousResultId': state.inflight_pulls.get(id(server)),
-                },
+                server, 'textDocument/diagnostic', params
             )
 
             if is_error:
