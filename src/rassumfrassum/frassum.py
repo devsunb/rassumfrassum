@@ -21,6 +21,22 @@ from .util import (
     warn,
 )
 
+# LSP method -> ServerCapabilities key, for unregistering capabilities.
+_CAP_KEY_BY_METHOD: dict[str, str] = {
+    'textDocument/codeAction': 'codeActionProvider',
+    'textDocument/completion': 'completionProvider',
+    'textDocument/declaration': 'declarationProvider',
+    'textDocument/definition': 'definitionProvider',
+    'textDocument/diagnostic': 'diagnosticProvider',
+    'textDocument/documentSymbol': 'documentSymbolProvider',
+    'textDocument/formatting': 'documentFormattingProvider',
+    'textDocument/implementation': 'implementationProvider',
+    'textDocument/rangeFormatting': 'documentRangeFormattingProvider',
+    'textDocument/references': 'referencesProvider',
+    'textDocument/rename': 'renameProvider',
+    'textDocument/typeDefinition': 'typeDefinitionProvider',
+}
+
 
 @dataclass
 class Server:
@@ -439,6 +455,15 @@ class LspLogic:
                         expanded_patterns.extend(_process_watcher(watcher))
                     if expanded_patterns:
                         self.file_watchers[reg_id] = (source, expanded_patterns)
+
+        # Stop routing what a server unregisters (the spec really spells
+        # the field "unregisterations")
+        elif method == "client/unregisterCapability" and (
+            unregistrations := params.get("unregisterations")
+        ):
+            for unreg in unregistrations:
+                if cap_key := _CAP_KEY_BY_METHOD.get(unreg.get("method")):
+                    source.caps.pop(cap_key, None)
         return None
 
     async def on_server_notification(
