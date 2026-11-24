@@ -22,14 +22,21 @@ from .util import (
 )
 
 
-def _advertises(caps: JSON, cap: str) -> bool:
-    """Return True if CAPS advertises CAP.
-
-    A capability is either a boolean or an options object, and an empty
-    options object `{}` still means the capability is supported.
-    """
-    value = caps.get(cap)
-    return value is not None and value is not False
+# LSP method -> ServerCapabilities key, for the methods routed by
+# capability that a server may also register dynamically.
+_CAP_KEY_BY_METHOD: dict[str, str] = {
+    'textDocument/codeAction': 'codeActionProvider',
+    'textDocument/completion': 'completionProvider',
+    'textDocument/declaration': 'declarationProvider',
+    'textDocument/definition': 'definitionProvider',
+    'textDocument/documentSymbol': 'documentSymbolProvider',
+    'textDocument/formatting': 'documentFormattingProvider',
+    'textDocument/implementation': 'implementationProvider',
+    'textDocument/rangeFormatting': 'documentRangeFormattingProvider',
+    'textDocument/references': 'referencesProvider',
+    'textDocument/rename': 'renameProvider',
+    'textDocument/typeDefinition': 'typeDefinitionProvider',
+}
 
 
 @dataclass
@@ -41,6 +48,87 @@ class Server:
     cookie: object = None
     # textDocumentSync kind (0/1/2), or None if unknown
     sync_kind: int | None = None
+    # Dynamic registrations: id -> (capability key, registerOptions)
+    registrations: dict[str, tuple[str, JSON]] = field(default_factory=dict)
+
+
+def _selector_matches(
+    selector: JSON, uri: str | None, language: str | None
+) -> bool:
+    """Return True if a registration's documentSelector covers a document.
+
+    A missing selector stands for the client's, which covers any document.
+    """
+    if not isinstance(selector, list):
+        return True
+    for f in selector:
+        if not isinstance(f, dict):
+            continue
+        if 'language' in f and f['language'] != language:
+            continue
+        if 'scheme' in f and not (uri and urlparse(uri).scheme == f['scheme']):
+            continue
+        if 'pattern' in f and not (
+            uri
+            and any(
+                _uri_matches_pattern(uri, p)
+                for p in _process_watcher({'globPattern': f['pattern']})
+            )
+        ):
+            continue
+        return True
+    return False
+
+
+def _cap_options(
+    server: Server,
+    cap: str,
+    uri: str | None = None,
+    language: str | None = None,
+) -> list:
+    """Return the values SERVER advertises CAP with for a document.
+
+    Those are the static value and the options of the registrations whose
+    documentSelector covers the document at URI in LANGUAGE.  A capability
+    is either a boolean or an options object, and an empty options object
+    `{}` still means the capability is supported.
+    """
+    values = [
+        options
+        for key, options in server.registrations.values()
+        if key == cap
+        and _selector_matches(options.get('documentSelector'), uri, language)
+    ]
+    value = server.caps.get(cap)
+    if value is not None and value is not False:
+        values.append(value)
+    return values
+
+
+def _advertises(
+    server: Server,
+    cap: str,
+    uri: str | None = None,
+    language: str | None = None,
+) -> bool:
+    """Return True if SERVER advertises CAP for the document at URI."""
+    return bool(_cap_options(server, cap, uri, language))
+
+
+def _items(params: JSON, key: str) -> list[dict]:
+    """Return the objects in the list at KEY of PARAMS, if any."""
+    items = params.get(key) if isinstance(params, dict) else None
+    return (
+        [i for i in items if isinstance(i, dict)]
+        if isinstance(items, list)
+        else []
+    )
+
+
+def _cap_key(item: dict) -> str | None:
+    """Return the capability key for the method of a (un)registration."""
+    method = item.get('method')
+    return _CAP_KEY_BY_METHOD.get(method) if isinstance(method, str) else None
 
 
 @dataclass
@@ -132,6 +220,16 @@ class LspLogic:
             List of servers that should receive the request, or
             DirectResponse to send immediately without forwarding
         """
+        # The document, for registrations limited by a documentSelector
+        text_doc = (
+            params.get('textDocument') if isinstance(params, dict) else None
+        )
+        uri = text_doc.get('uri') if isinstance(text_doc, dict) else None
+        if not isinstance(uri, str):
+            uri = None
+        doc = self.documents.get(uri) if uri else None
+        language = doc.language_id if doc else None
+
         # Check for data recovery from stash
         if method.endswith("resolve") and (
             stashed := self.stash.get(cast(int, params.get('data')))
@@ -176,7 +274,9 @@ class LspLogic:
         # Route codeAction to all supporting servers
         elif method == 'textDocument/codeAction':
             return [
-                s for s in servers if _advertises(s.caps, 'codeActionProvider')
+                s
+                for s in servers
+                if _advertises(s, 'codeActionProvider', uri, language)
             ]
 
         # Route location-based requests to all supporting servers
@@ -187,7 +287,7 @@ class LspLogic:
             'textDocument/declaration': 'declarationProvider',
             'textDocument/references': 'referencesProvider',
         }.get(method):
-            return [s for s in servers if _advertises(s.caps, cap)]
+            return [s for s in servers if _advertises(s, cap, uri, language)]
 
         elif method == 'workspace/executeCommand':
             probe = self.commands_map.get(cast(str, params.get('command')))
@@ -196,7 +296,9 @@ class LspLogic:
         # Completions is special
         elif method == 'textDocument/completion':
             cands = [
-                s for s in servers if _advertises(s.caps, 'completionProvider')
+                s
+                for s in servers
+                if _advertises(s, 'completionProvider', uri, language)
             ]
             if len(cands) <= 1:
                 return cands
@@ -204,8 +306,13 @@ class LspLogic:
                 return [
                     s
                     for s in cands
-                    if isinstance(cp := s.caps.get("completionProvider"), dict)
-                    and k in cp.get("triggerCharacters", [])
+                    if any(
+                        isinstance(cp, dict)
+                        and k in cp.get("triggerCharacters", [])
+                        for cp in _cap_options(
+                            s, "completionProvider", uri, language
+                        )
+                    )
                 ]
             else:
                 return cands
@@ -218,7 +325,7 @@ class LspLogic:
             'textDocument/documentSymbol': 'documentSymbolProvider',
         }.get(method):
             for s in servers:
-                if _advertises(s.caps, cap):
+                if _advertises(s, cap, uri, language):
                     return [s]
             return []
 
@@ -425,6 +532,32 @@ class LspLogic:
                             new_item = dmerge(overlay, generic)
                             break
                 items[i] = new_item
+
+        # Apply the dynamic registrations the client accepted
+        elif method == 'client/registerCapability' and not is_error:
+            for reg in _items(request_params, 'registrations'):
+                if (cap := _cap_key(reg)) and isinstance(
+                    reg_id := reg.get('id'), str
+                ):
+                    options = reg.get('registerOptions')
+                    server.registrations[reg_id] = (
+                        cap,
+                        options if isinstance(options, dict) else {},
+                    )
+
+        # And unregistrations (the spec really spells the field
+        # "unregisterations").  A static capability goes only if it was
+        # advertised with the id that is unregistered.
+        elif method == 'client/unregisterCapability' and not is_error:
+            for unreg in _items(request_params, 'unregisterations'):
+                if not isinstance(reg_id := unreg.get('id'), str):
+                    continue
+                if server.registrations.pop(reg_id, None) is None and (
+                    cap := _cap_key(unreg)
+                ):
+                    value = server.caps.get(cap)
+                    if isinstance(value, dict) and value.get('id') == reg_id:
+                        del server.caps[cap]
 
     async def on_server_request(
         self, method: str, params: JSON, source: Server
