@@ -180,6 +180,7 @@ async def run_multiplexer(
 
     # Track shutdown state
     shutting_down = False
+    exit_without_shutdown = False
 
     log(f"Primary server: {procs[0].name}")
     if len(procs) > 1:
@@ -309,7 +310,8 @@ async def run_multiplexer(
         """
         Send a notification to a server (for use by logic layer).
         """
-        if shutting_down:
+        # Servers still need 'exit' after 'shutdown'
+        if shutting_down and method != "exit":
             debug(f"Skipping notification to server (shutting down): {method}")
             return
 
@@ -469,7 +471,7 @@ async def run_multiplexer(
 
     async def handle_client_messages():
         """Read from client and route to appropriate servers."""
-        nonlocal shutting_down
+        nonlocal shutting_down, exit_without_shutdown
         try:
             while True:
                 msg = await read_lsp_message(client_reader)
@@ -502,6 +504,13 @@ async def run_multiplexer(
                         await logic.on_client_notification(
                             method, msg.get("params", {})
                         )
+                    # 'exit' has been forwarded to the servers.  Stop
+                    # reading: the client may keep its end open and
+                    # wait for us to exit (Eglot does).
+                    if method == "exit":
+                        exit_without_shutdown = not shutting_down
+                        shutting_down = True
+                        break
                 elif method is not None:
                     # Client request
                     id = cast(ReqId, id)
@@ -721,3 +730,7 @@ async def run_multiplexer(
     # Wait for all servers to exit
     for p in procs:
         _ = await p.process.wait()
+
+    # As LSP servers do, exit with 1 on 'exit' without 'shutdown'
+    if exit_without_shutdown:
+        sys.exit(1)
